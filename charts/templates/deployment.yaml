@@ -33,20 +33,67 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+
+          {{- with .Values.command }}
+          command:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
           ports:
             - name: http
-              containerPort: 8000
+              containerPort: {{ .Values.containerPort }}
               protocol: TCP
+
+          {{- if .Values.probes.http.enabled }}
           livenessProbe:
             httpGet:
-              path: /api/v1/checkapi
+              path: {{ .Values.probes.http.path }}
               port: http
+            initialDelaySeconds: {{ .Values.probes.http.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.http.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.http.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.http.failureThreshold }}
+            successThreshold: {{ .Values.probes.http.successThreshold }}
           readinessProbe:
             httpGet:
-              path: /api/v1/checkapi
+              path: {{ .Values.probes.http.path }}
               port: http
+            initialDelaySeconds: {{ .Values.probes.http.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.http.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.http.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.http.failureThreshold }}
+            successThreshold: {{ .Values.probes.http.successThreshold }}
+          {{- else if .Values.probes.tcp.enabled }}
+          livenessProbe:
+            tcpSocket:
+              port: {{ .Values.containerPort }}
+            initialDelaySeconds: {{ .Values.probes.tcp.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.tcp.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.tcp.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.tcp.failureThreshold }}
+            successThreshold: {{ .Values.probes.tcp.successThreshold }}
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.containerPort }}
+            initialDelaySeconds: {{ .Values.probes.tcp.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.tcp.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.tcp.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.tcp.failureThreshold }}
+            successThreshold: {{ .Values.probes.tcp.successThreshold }}
+          {{- end }}
+
+          {{- if .Values.extraEnv }}
+          env:
+            {{- toYaml .Values.extraEnv | nindent 12 }}
+          {{- end }}
+
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
