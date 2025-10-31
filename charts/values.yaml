@@ -5,10 +5,10 @@
 replicaCount: 3
 
 image:
-  repository: sajjadhz/fastapiapp
+  repository: docker.io/examjeanlucbernier/datascientestjeanlucbernier
+  tag: "override-me"
   pullPolicy: IfNotPresent
-  # Overrides the image tag whose default is the chart appVersion.
-  tag: "latest"
+  
 
 imagePullSecrets: 
   - name: "regcred"

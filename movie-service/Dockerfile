@@ -16,5 +16,6 @@ COPY . /app/
 # (facultatif mais utile)
 EXPOSE 8000
 
+ENV UVICORN_NO_UVLOOP=1
 # Lancement du serveur FastAPI
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
