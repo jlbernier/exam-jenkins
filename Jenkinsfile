@@ -1,98 +1,137 @@
 pipeline {
   agent any
+
+  parameters {
+    string(name: 'DOCKER_USER', defaultValue: 'examjeanlucbernier', description: 'Docker Hub username')
+  }
+
+  options {
+    timestamps()
+    ansiColor('xterm')
+  }
+
   environment {
     DOCKER_REPO = 'docker.io/examjeanlucbernier/datascientestjeanlucbernier'
-    MOVIE_TAG   = "movie-build-${env.BUILD_NUMBER}"
-    CAST_TAG    = "cast-build-${env.BUILD_NUMBER}"
+    TS         = "${new Date().format('yyyyMMddHHmmss', TimeZone.getTimeZone('UTC'))}"
+    MOVIE_TAG  = "movie-${env.BRANCH_NAME}-${env.BUILD_NUMBER}-${TS}"
+    CAST_TAG   = "cast-${env.BRANCH_NAME}-${env.BUILD_NUMBER}-${TS}"
   }
-  parameters {
-    choice(name: 'TARGET_ENV', choices: ['dev','qa','staging','prod'], description: 'Environnement cible')
-  }
+
   stages {
     stage('Checkout') {
-      steps { checkout scm }
+      steps {
+        checkout([$class: 'GitSCM',
+          branches: [[name: env.CHANGE_BRANCH ? "origin/${env.CHANGE_BRANCH}" : "origin/${env.BRANCH_NAME}"]],
+          userRemoteConfigs: [[url: 'https://github.com/jlbernier/exam-jenkins.git']]
+        ])
+      }
     }
 
-    stage('Build & Push Images') {
+    stage('Docker login') {
       steps {
-        withCredentials([usernamePassword(credentialsId: 'dockerhub', usernameVariable: 'DH_USER', passwordVariable: 'DH_PASS')]) {
+        // DOCKER_HUB_PASS = Secret Text (token/mot de passe)
+        withCredentials([string(credentialsId: 'DOCKER_HUB_PASS', variable: 'DOCKER_PASS')]) {
           sh '''
-            echo "$DH_PASS" | docker login -u "$DH_USER" --password-stdin
-            docker build -t $DOCKER_REPO:$MOVIE_TAG ./movie-service
-            docker build -t $DOCKER_REPO:$CAST_TAG  ./cast-service
-            docker push $DOCKER_REPO:$MOVIE_TAG
-            docker push $DOCKER_REPO:$CAST_TAG
+            set -euo pipefail
+            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
           '''
         }
       }
     }
 
-    stage('Deploy (helm upgrade --install)') {
+    stage('Build images') {
       steps {
-        withKubeConfig(credentialsId: 'KUBECONFIG') {
-          sh '''
-            NS="${TARGET_ENV}"
-            MOVIE_NODEPORT="30007"; CAST_NODEPORT="30008"
-            [ "$NS" = "qa" ] && MOVIE_NODEPORT="30107" && CAST_NODEPORT="30108"
-            [ "$NS" = "staging" ] && MOVIE_NODEPORT="30207" && CAST_NODEPORT="30208"
-            [ "$NS" = "prod" ] && MOVIE_NODEPORT="30307" && CAST_NODEPORT="30308"
-
-            helm upgrade --install exam-movie ./charts \
-              --namespace "$NS" --create-namespace \
-              --set image.repository="$DOCKER_REPO" \
-              --set image.tag="$MOVIE_TAG" \
-              --set imagePullSecrets[0].name=regcred \
-              --set service.type=NodePort \
-              --set service.port=80 \
-              --set service.nodePort="$MOVIE_NODEPORT" \
-              --set service.targetPort=8000
-
-            helm upgrade --install exam-cast ./charts \
-              --namespace "$NS" \
-              --set image.repository="$DOCKER_REPO" \
-              --set image.tag="$CAST_TAG" \
-              --set imagePullSecrets[0].name=regcred \
-              --set service.type=NodePort \
-              --set service.port=80 \
-              --set service.nodePort="$CAST_NODEPORT" \
-              --set service.targetPort=8000
-
-            # Injecter DATABASE_URI depuis secrets pré-créés
-            kubectl -n "$NS" set env deploy/exam-movie-fastapiapp --from=secret/movie-env
-            kubectl -n "$NS" set env deploy/exam-cast-fastapiapp  --from=secret/cast-env
-
-            # cast n’a pas /api/v1/checkapi → probes TCP
-            kubectl -n "$NS" patch deploy exam-cast-fastapiapp -p '{
-              "spec":{"template":{"spec":{"containers":[{
-                "name":"fastapiapp",
-                "readinessProbe":{"httpGet":null,"tcpSocket":{"port":8000},"initialDelaySeconds":5,"periodSeconds":10,"timeoutSeconds":2,"failureThreshold":3},
-                "livenessProbe" :{"httpGet":null,"tcpSocket":{"port":8000},"initialDelaySeconds":5,"periodSeconds":10,"timeoutSeconds":2,"failureThreshold":3}
-              }]}}}}'
-
-            kubectl -n "$NS" rollout status deploy/exam-movie-fastapiapp --timeout=180s || true
-            kubectl -n "$NS" rollout status deploy/exam-cast-fastapiapp  --timeout=180s || true
-          '''
-        }
+        sh '''
+          set -euo pipefail
+          docker build -t "${DOCKER_REPO}:${MOVIE_TAG}" ./movie-service
+          docker build -t "${DOCKER_REPO}:${CAST_TAG}"  ./cast-service
+        '''
       }
     }
 
-    stage('Gate PROD (manuel + master only)') {
-      when {
-        allOf {
-          expression { params.TARGET_ENV == 'prod' }
-          branch 'master'
-        }
-      }
+    stage('Push images') {
       steps {
-        input(message: 'Déployer en PROD ?', ok: 'Déployer')
-        echo 'Déploiement PROD confirmé.'
+        sh '''
+          set -euo pipefail
+          docker push "${DOCKER_REPO}:${MOVIE_TAG}"
+          docker push "${DOCKER_REPO}:${CAST_TAG}"
+        '''
+      }
+    }
+
+    stage('Deploy to DEV') {
+      steps { script { deployEnv('dev', 30007, 30008) } }
+    }
+
+    stage('Deploy to QA (master only)') {
+      when { branch 'master' }
+      steps { script { deployEnv('qa', 30107, 30108) } }
+    }
+
+    stage('Deploy to STAGING (master only)') {
+      when { branch 'master' }
+      steps { script { deployEnv('staging', 30207, 30208) } }
+    }
+
+    stage('Deploy to PROD (manual, master only)') {
+      when { branch 'master' }
+      steps {
+        input message: 'Confirmer le déploiement en PROD ?'
+        script { deployEnv('prod', 30307, 30308) }
       }
     }
   }
 
   post {
     always {
-      echo "Done. TARGET_ENV=${params.TARGET_ENV}, MOVIE_TAG=${env.MOVIE_TAG}, CAST_TAG=${env.CAST_TAG}"
+      echo "MOVIE_TAG=${env.MOVIE_TAG}"
+      echo "CAST_TAG=${env.CAST_TAG}"
     }
   }
+}
+
+def deployEnv(String ns, int movieNodePort, int castNodePort) {
+  sh """
+    set -euo pipefail
+
+    helm upgrade --install exam-movie ./charts \\
+      --namespace '${ns}' --create-namespace \\
+      --set image.repository='${DOCKER_REPO}' \\
+      --set image.tag='${MOVIE_TAG}' \\
+      --set imagePullSecrets[0].name=regcred \\
+      --set service.type=NodePort \\
+      --set service.port=80 \\
+      --set service.targetPort=8000 \\
+      --set service.nodePort=${movieNodePort}
+
+    helm upgrade --install exam-cast ./charts \\
+      --namespace '${ns}' \\
+      --set image.repository='${DOCKER_REPO}' \\
+      --set image.tag='${CAST_TAG}' \\
+      --set imagePullSecrets[0].name=regcred \\
+      --set service.type=NodePort \\
+      --set service.port=80 \\
+      --set service.targetPort=8000 \\
+      --set service.nodePort=${castNodePort}
+
+    kubectl -n '${ns}' set env deploy/exam-movie-fastapiapp --from=secret/movie-env
+    kubectl -n '${ns}' set env deploy/exam-cast-fastapiapp  --from=secret/cast-env
+
+    kubectl -n '${ns}' patch deploy exam-cast-fastapiapp -p '{
+      "spec":{"template":{"spec":{"containers":[{
+        "name":"fastapiapp",
+        "readinessProbe":{"httpGet":null,"tcpSocket":{"port":8000},"initialDelaySeconds":5,"periodSeconds":10,"timeoutSeconds":2,"failureThreshold":3},
+        "livenessProbe" :{"httpGet":null,"tcpSocket":{"port":8000},"initialDelaySeconds":5,"periodSeconds":10,"timeoutSeconds":2,"failureThreshold":3}
+      }]}}}}
+    '
+
+    kubectl -n '${ns}' rollout restart deploy/exam-movie-fastapiapp
+    kubectl -n '${ns}' rollout restart deploy/exam-cast-fastapiapp
+
+    kubectl -n '${ns}' rollout status deploy/exam-movie-fastapiapp --timeout=180s || true
+    kubectl -n '${ns}' rollout status deploy/exam-cast-fastapiapp  --timeout=180s || true
+
+    kubectl -n '${ns}' get svc exam-movie-fastapiapp exam-cast-fastapiapp -o wide
+    kubectl -n '${ns}' get endpoints exam-movie-fastapiapp exam-cast-fastapiapp -o wide || true
+  """
 }
