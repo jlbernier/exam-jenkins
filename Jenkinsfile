@@ -29,7 +29,7 @@ pipeline {
 
     stage('Deploy (helm upgrade --install)') {
       steps {
-        withKubeConfig(credentialsId: 'kubeconfig-a3bc') {
+        withKubeConfig(credentialsId: 'KUBECONFIG') {
           sh '''
             NS="${TARGET_ENV}"
             MOVIE_NODEPORT="30007"; CAST_NODEPORT="30008"
