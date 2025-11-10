@@ -8,28 +8,20 @@ pipeline {
   options {
     timestamps()
     ansiColor('xterm')
+    // on laisse le checkout implicite de Jenkins (ne pas activer skipDefaultCheckout ici)
   }
 
   environment {
     DOCKER_REPO = 'docker.io/examjeanlucbernier/datascientestjeanlucbernier'
     TS         = "${new Date().format('yyyyMMddHHmmss', TimeZone.getTimeZone('UTC'))}"
-    MOVIE_TAG  = "movie-${env.BRANCH_NAME}-${env.BUILD_NUMBER}-${TS}"
-    CAST_TAG   = "cast-${env.BRANCH_NAME}-${env.BUILD_NUMBER}-${TS}"
+    BRANCH     = "${env.BRANCH_NAME ?: 'master'}"
+    MOVIE_TAG  = "movie-${BRANCH}-${env.BUILD_NUMBER}-${TS}"
+    CAST_TAG   = "cast-${BRANCH}-${env.BUILD_NUMBER}-${TS}"
   }
 
   stages {
-    stage('Checkout') {
-      steps {
-        checkout([$class: 'GitSCM',
-          branches: [[name: env.CHANGE_BRANCH ? "origin/${env.CHANGE_BRANCH}" : "origin/${env.BRANCH_NAME}"]],
-          userRemoteConfigs: [[url: 'https://github.com/jlbernier/exam-jenkins.git']]
-        ])
-      }
-    }
-
     stage('Docker login') {
       steps {
-        // DOCKER_HUB_PASS = Secret Text (token/mot de passe)
         withCredentials([string(credentialsId: 'DOCKER_HUB_PASS', variable: 'DOCKER_PASS')]) {
           sh '''
             set -euo pipefail
@@ -117,6 +109,7 @@ def deployEnv(String ns, int movieNodePort, int castNodePort) {
     kubectl -n '${ns}' set env deploy/exam-movie-fastapiapp --from=secret/movie-env
     kubectl -n '${ns}' set env deploy/exam-cast-fastapiapp  --from=secret/cast-env
 
+    # cast n'a pas /api/v1/checkapi → probes TCP
     kubectl -n '${ns}' patch deploy exam-cast-fastapiapp -p '{
       "spec":{"template":{"spec":{"containers":[{
         "name":"fastapiapp",
@@ -130,8 +123,5 @@ def deployEnv(String ns, int movieNodePort, int castNodePort) {
 
     kubectl -n '${ns}' rollout status deploy/exam-movie-fastapiapp --timeout=180s || true
     kubectl -n '${ns}' rollout status deploy/exam-cast-fastapiapp  --timeout=180s || true
-
-    kubectl -n '${ns}' get svc exam-movie-fastapiapp exam-cast-fastapiapp -o wide
-    kubectl -n '${ns}' get endpoints exam-movie-fastapiapp exam-cast-fastapiapp -o wide || true
   """
 }
