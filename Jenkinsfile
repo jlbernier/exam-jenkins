@@ -125,7 +125,7 @@ echo "cast=${CAST_IMAGE}:${GIT_SHA}"
     }
 
     stage('Deploy QA') {
-      when { branch 'qa' }
+      when { anyOf { branch 'qa'; branch 'master' } }
       steps {
         sh(label: 'deploy qa', script: '''#!/usr/bin/env bash
 set -euo pipefail
@@ -135,7 +135,7 @@ echo "Deploy QA placeholder"
     }
 
     stage('Deploy STAGING') {
-      when { branch 'staging' }
+      when { anyOf { branch 'staging'; branch 'master' } }
       steps {
         sh(label: 'deploy staging', script: '''#!/usr/bin/env bash
 set -euo pipefail
@@ -147,7 +147,7 @@ echo "Deploy STAGING placeholder"
     // PROD: garde "main" si tu veux un flux type GitHub standard,
     // sinon change en: anyOf { branch 'main'; branch 'master' }
     stage('Deploy PROD (manual)') {
-      when { branch 'main' }
+      when { branch 'master' }
       steps {
         input message: "Déployer en PROD avec ${GIT_SHA} ?", ok: "Déployer"
         sh(label: 'deploy prod', script: '''#!/usr/bin/env bash
