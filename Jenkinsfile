@@ -7,27 +7,21 @@ pipeline {
   }
 
   environment {
-    // Docker Hub namespace (ton username)
     DOCKERHUB_NAMESPACE = 'examjeanlucbernier'
-
-    // Jenkins credentials ID (Kind: Username with password)
     DOCKERHUB_CREDENTIALS_ID = 'dockerhub-creds'
-
-    // Images
     MOVIE_IMAGE = "${DOCKERHUB_NAMESPACE}/movie-service"
     CAST_IMAGE  = "${DOCKERHUB_NAMESPACE}/cast-service"
   }
 
   stages {
-
     stage('Checkout') {
       steps {
         checkout scm
-        sh '''
-          set -euo pipefail
-          echo "Branch: ${BRANCH_NAME:-unknown}"
-          git rev-parse --short=12 HEAD
-        '''
+        sh(label: 'git info', script: '''#!/usr/bin/env bash
+set -euo pipefail
+echo "Branch: ${BRANCH_NAME:-unknown}"
+git rev-parse --short=12 HEAD
+''')
       }
     }
 
@@ -39,33 +33,33 @@ pipeline {
             .replaceAll('[^a-zA-Z0-9_.-]+', '-')
             .toLowerCase()
         }
-        sh '''
-          set -euo pipefail
-          echo "GIT_SHA=${GIT_SHA}"
-          echo "BRANCH_TAG=${BRANCH_TAG}"
-        '''
+        sh(label: 'show tags', script: '''#!/usr/bin/env bash
+set -euo pipefail
+echo "GIT_SHA=${GIT_SHA}"
+echo "BRANCH_TAG=${BRANCH_TAG}"
+''')
       }
     }
 
     stage('Build images') {
       steps {
-        sh '''
-          set -euo pipefail
+        sh(label: 'docker build', script: '''#!/usr/bin/env bash
+set -euo pipefail
 
-          echo "[Build] movie-service:${GIT_SHA}"
-          docker build \
-            -t "${MOVIE_IMAGE}:${GIT_SHA}" \
-            -t "${MOVIE_IMAGE}:${BRANCH_TAG}" \
-            ./movie-service
+echo "[Build] ${MOVIE_IMAGE}:${GIT_SHA}"
+docker build \
+  -t "${MOVIE_IMAGE}:${GIT_SHA}" \
+  -t "${MOVIE_IMAGE}:${BRANCH_TAG}" \
+  ./movie-service
 
-          echo "[Build] cast-service:${GIT_SHA}"
-          docker build \
-            -t "${CAST_IMAGE}:${GIT_SHA}" \
-            -t "${CAST_IMAGE}:${BRANCH_TAG}" \
-            ./cast-service
+echo "[Build] ${CAST_IMAGE}:${GIT_SHA}"
+docker build \
+  -t "${CAST_IMAGE}:${GIT_SHA}" \
+  -t "${CAST_IMAGE}:${BRANCH_TAG}" \
+  ./cast-service
 
-          docker images | head -n 30
-        '''
+docker images | head -n 30
+''')
       }
     }
 
@@ -76,32 +70,27 @@ pipeline {
           usernameVariable: 'DOCKERHUB_USERNAME',
           passwordVariable: 'DOCKERHUB_TOKEN'
         )]) {
-          sh '''
-            set -euo pipefail
+          sh(label: 'docker login + push', script: '''#!/usr/bin/env bash
+set -euo pipefail
 
-            echo "DOCKERHUB_USERNAME length: ${#DOCKERHUB_USERNAME}"
-            echo "DOCKERHUB_TOKEN length: ${#DOCKERHUB_TOKEN}"
+echo "DOCKERHUB_USERNAME length: ${#DOCKERHUB_USERNAME}"
+echo "DOCKERHUB_TOKEN length: ${#DOCKERHUB_TOKEN}"
 
-            if [ -z "${DOCKERHUB_USERNAME:-}" ] || [ -z "${DOCKERHUB_TOKEN:-}" ]; then
-              echo "ERROR: DockerHub credentials are missing/empty in Jenkins (credentialsId=${DOCKERHUB_CREDENTIALS_ID})."
-              echo "Fix: Jenkins > Manage Jenkins > Credentials > System > Global > Add Credentials"
-              echo "Type: Username with password"
-              echo "Username: your DockerHub username"
-              echo "Password: your DockerHub Access Token"
-              echo "ID: ${DOCKERHUB_CREDENTIALS_ID}"
-              exit 1
-            fi
+if [[ -z "${DOCKERHUB_USERNAME:-}" || -z "${DOCKERHUB_TOKEN:-}" ]]; then
+  echo "ERROR: DockerHub credentials are missing/empty (credentialsId=${DOCKERHUB_CREDENTIALS_ID})"
+  exit 1
+fi
 
-            echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
-            docker info | sed -n '/Username:/p' || true
+echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+docker info | sed -n '/Username:/p' || true
 
-            docker push "${MOVIE_IMAGE}:${GIT_SHA}"
-            docker push "${MOVIE_IMAGE}:${BRANCH_TAG}"
-            docker push "${CAST_IMAGE}:${GIT_SHA}"
-            docker push "${CAST_IMAGE}:${BRANCH_TAG}"
+docker push "${MOVIE_IMAGE}:${GIT_SHA}"
+docker push "${MOVIE_IMAGE}:${BRANCH_TAG}"
+docker push "${CAST_IMAGE}:${GIT_SHA}"
+docker push "${CAST_IMAGE}:${BRANCH_TAG}"
 
-            docker logout || true
-          '''
+docker logout || true
+''')
         }
       }
     }
@@ -109,35 +98,32 @@ pipeline {
     stage('Deploy DEV') {
       when { branch 'develop' }
       steps {
-        sh '''
-          set -euo pipefail
-          echo "Deploy DEV (placeholder)"
-          echo "movie=${MOVIE_IMAGE}:${GIT_SHA}"
-          echo "cast=${CAST_IMAGE}:${GIT_SHA}"
-          # TODO: commandes de déploiement
-        '''
+        sh(label: 'deploy dev', script: '''#!/usr/bin/env bash
+set -euo pipefail
+echo "Deploy DEV placeholder"
+echo "movie=${MOVIE_IMAGE}:${GIT_SHA}"
+echo "cast=${CAST_IMAGE}:${GIT_SHA}"
+''')
       }
     }
 
     stage('Deploy QA') {
       when { branch 'qa' }
       steps {
-        sh '''
-          set -euo pipefail
-          echo "Deploy QA (placeholder)"
-          # TODO
-        '''
+        sh(label: 'deploy qa', script: '''#!/usr/bin/env bash
+set -euo pipefail
+echo "Deploy QA placeholder"
+''')
       }
     }
 
     stage('Deploy STAGING') {
       when { branch 'staging' }
       steps {
-        sh '''
-          set -euo pipefail
-          echo "Deploy STAGING (placeholder)"
-          # TODO
-        '''
+        sh(label: 'deploy staging', script: '''#!/usr/bin/env bash
+set -euo pipefail
+echo "Deploy STAGING placeholder"
+''')
       }
     }
 
@@ -145,18 +131,19 @@ pipeline {
       when { branch 'main' }
       steps {
         input message: "Déployer en PROD avec ${GIT_SHA} ?", ok: "Déployer"
-        sh '''
-          set -euo pipefail
-          echo "Deploy PROD (placeholder)"
-          # TODO
-        '''
+        sh(label: 'deploy prod', script: '''#!/usr/bin/env bash
+set -euo pipefail
+echo "Deploy PROD placeholder"
+''')
       }
     }
   }
 
   post {
     always {
-      sh 'docker logout || true'
+      sh(label: 'logout', script: '''#!/usr/bin/env bash
+docker logout || true
+''')
     }
     success {
       echo "✅ Pipeline OK: images poussées avec tag ${env.GIT_SHA}"
