@@ -4,17 +4,16 @@ pipeline {
   options {
     timestamps()
     disableConcurrentBuilds()
-    ansiColor('xterm')
   }
 
   environment {
-    // Docker Hub repo namespace (ton username)
+    // Docker Hub namespace (ton username)
     DOCKERHUB_NAMESPACE = 'examjeanlucbernier'
 
-    // Jenkins credentials ID (Username/Password = username/token)
+    // Jenkins credentials ID (Kind: Username with password)
     DOCKERHUB_CREDENTIALS_ID = 'dockerhub-creds'
 
-    // Services (adapte si besoin)
+    // Images
     MOVIE_IMAGE = "${DOCKERHUB_NAMESPACE}/movie-service"
     CAST_IMAGE  = "${DOCKERHUB_NAMESPACE}/cast-service"
   }
@@ -35,9 +34,7 @@ pipeline {
     stage('Compute tags') {
       steps {
         script {
-          // Tag court du commit pour Docker
           env.GIT_SHA = sh(script: "git rev-parse --short=12 HEAD", returnStdout: true).trim()
-          // Tag “safe” pour branch (optionnel)
           env.BRANCH_TAG = (env.BRANCH_NAME ?: "detached")
             .replaceAll('[^a-zA-Z0-9_.-]+', '-')
             .toLowerCase()
@@ -67,7 +64,7 @@ pipeline {
             -t "${CAST_IMAGE}:${BRANCH_TAG}" \
             ./cast-service
 
-          docker images | head -n 20
+          docker images | head -n 30
         '''
       }
     }
@@ -82,22 +79,25 @@ pipeline {
           sh '''
             set -euo pipefail
 
-            if [ -z "${DOCKERHUB_USERNAME:-}" ]; then
-              echo "ERROR: DOCKERHUB_USERNAME is empty (check Jenkins credentialsId=${DOCKERHUB_CREDENTIALS_ID})"
+            echo "DOCKERHUB_USERNAME length: ${#DOCKERHUB_USERNAME}"
+            echo "DOCKERHUB_TOKEN length: ${#DOCKERHUB_TOKEN}"
+
+            if [ -z "${DOCKERHUB_USERNAME:-}" ] || [ -z "${DOCKERHUB_TOKEN:-}" ]; then
+              echo "ERROR: DockerHub credentials are missing/empty in Jenkins (credentialsId=${DOCKERHUB_CREDENTIALS_ID})."
+              echo "Fix: Jenkins > Manage Jenkins > Credentials > System > Global > Add Credentials"
+              echo "Type: Username with password"
+              echo "Username: your DockerHub username"
+              echo "Password: your DockerHub Access Token"
+              echo "ID: ${DOCKERHUB_CREDENTIALS_ID}"
               exit 1
             fi
 
             echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
             docker info | sed -n '/Username:/p' || true
 
-            echo "[Push] ${MOVIE_IMAGE}:${GIT_SHA}"
             docker push "${MOVIE_IMAGE}:${GIT_SHA}"
-            echo "[Push] ${MOVIE_IMAGE}:${BRANCH_TAG}"
             docker push "${MOVIE_IMAGE}:${BRANCH_TAG}"
-
-            echo "[Push] ${CAST_IMAGE}:${GIT_SHA}"
             docker push "${CAST_IMAGE}:${GIT_SHA}"
-            echo "[Push] ${CAST_IMAGE}:${BRANCH_TAG}"
             docker push "${CAST_IMAGE}:${BRANCH_TAG}"
 
             docker logout || true
@@ -111,14 +111,10 @@ pipeline {
       steps {
         sh '''
           set -euo pipefail
-          echo "Deploy DEV with tags:"
-          echo "  movie=${MOVIE_IMAGE}:${GIT_SHA}"
-          echo "  cast=${CAST_IMAGE}:${GIT_SHA}"
-
-          # TODO: mets ici ta commande de déploiement (helm/kubectl/ssh/ansible)
-          # Exemple:
-          # helm upgrade --install movie ./charts/movie --set image.repository=${MOVIE_IMAGE} --set image.tag=${GIT_SHA} -n dev
-          # helm upgrade --install cast  ./charts/cast  --set image.repository=${CAST_IMAGE}  --set image.tag=${GIT_SHA} -n dev
+          echo "Deploy DEV (placeholder)"
+          echo "movie=${MOVIE_IMAGE}:${GIT_SHA}"
+          echo "cast=${CAST_IMAGE}:${GIT_SHA}"
+          # TODO: commandes de déploiement
         '''
       }
     }
@@ -160,10 +156,7 @@ pipeline {
 
   post {
     always {
-      sh '''
-        set +e
-        docker logout || true
-      '''
+      sh 'docker logout || true'
     }
     success {
       echo "✅ Pipeline OK: images poussées avec tag ${env.GIT_SHA}"
