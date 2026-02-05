@@ -8,6 +8,7 @@ pipeline {
     CAST_IMAGE     = "${DOCKERHUB_USER}/cast-service"
     CHART_DIR      = "charts"
 
+    // One Helm chart used twice => two releases per namespace
     RELEASE_MOVIE  = "movie"
     RELEASE_CAST   = "cast"
   }
@@ -64,14 +65,16 @@ def deployEnv(String ns) {
     echo "== Deploy MOVIE to namespace ${ns} =="
     helm upgrade --install ${RELEASE_MOVIE} ${CHART_DIR} \
       -n ${ns} --create-namespace \
-      --set image.repository=${MOVIE_IMAGE} \
-      --set image.tag=${GIT_SHA}
+      --set image.repository=docker.io/${MOVIE_IMAGE} \
+      --set image.tag=${GIT_SHA} \
+      --set imagePullSecrets={} 
 
     echo "== Deploy CAST to namespace ${ns} =="
     helm upgrade --install ${RELEASE_CAST} ${CHART_DIR} \
       -n ${ns} --create-namespace \
-      --set image.repository=${CAST_IMAGE} \
-      --set image.tag=${GIT_SHA}
+      --set image.repository=docker.io/${CAST_IMAGE} \
+      --set image.tag=${GIT_SHA} \
+      --set imagePullSecrets={} 
 
     echo "== Releases in ${ns} =="
     helm -n ${ns} list
