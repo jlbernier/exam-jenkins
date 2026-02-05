@@ -14,6 +14,7 @@ pipeline {
   }
 
   stages {
+
     stage('Checkout') {
       steps {
         checkout scm
@@ -37,21 +38,31 @@ git rev-parse --abbrev-ref HEAD || true
         script {
           env.GIT_SHA = sh(script: "git rev-parse --short=12 HEAD", returnStdout: true).trim()
 
-          // Try Jenkins BRANCH_NAME first; if empty or "null", fall back to git.
+          // Pipeline from SCM: BRANCH_NAME often empty -> compute from git
           def b = (env.BRANCH_NAME ?: "").trim()
+          if (!b || b == "null") {
+            // Sometimes GIT_BRANCH can be like "origin/master"
+            b = (env.GIT_BRANCH ?: "").trim()
+          }
+          if (b) {
+            b = b.replaceFirst(/^origin\\//, "")
+          }
           if (!b || b == "null") {
             b = sh(script: "git rev-parse --abbrev-ref HEAD || true", returnStdout: true).trim()
           }
           if (!b || b == "HEAD") {
+            // last-resort: try to resolve remote default branch name (if any)
             b = "detached"
           }
 
+          env.EFFECTIVE_BRANCH = b
           env.BRANCH_TAG = b.replaceAll('[^a-zA-Z0-9_.-]+', '-').toLowerCase()
         }
 
-        sh(label: 'show tags', script: '''#!/usr/bin/env bash
+        sh(label: 'show computed vars', script: '''#!/usr/bin/env bash
 set -euo pipefail
 echo "GIT_SHA=${GIT_SHA}"
+echo "EFFECTIVE_BRANCH=${EFFECTIVE_BRANCH}"
 echo "BRANCH_TAG=${BRANCH_TAG}"
 ''')
       }
@@ -111,48 +122,67 @@ docker logout || true
       }
     }
 
-    // ✅ DEV: master (ton cas actuel) + develop (si tu l’utilises plus tard)
+    // deploy pour develop si branche develop ou master
     stage('Deploy DEV') {
-      when { anyOf { branch 'master'; branch 'develop' } }
+      when {
+        expression { return env.EFFECTIVE_BRANCH in ['develop', 'master'] }
+      }
       steps {
         sh(label: 'deploy dev', script: '''#!/usr/bin/env bash
 set -euo pipefail
-echo "Deploy DEV placeholder"
+echo "Deploy DEV"
+echo "branch=${EFFECTIVE_BRANCH}"
 echo "movie=${MOVIE_IMAGE}:${GIT_SHA}"
 echo "cast=${CAST_IMAGE}:${GIT_SHA}"
 ''')
       }
     }
 
+    // qa si qa ou master
     stage('Deploy QA') {
-      when { anyOf { branch 'qa'; branch 'master' } }
+      when {
+        expression { return env.EFFECTIVE_BRANCH in ['qa', 'master'] }
+      }
       steps {
         sh(label: 'deploy qa', script: '''#!/usr/bin/env bash
 set -euo pipefail
-echo "Deploy QA placeholder"
+echo "Deploy QA"
+echo "branch=${EFFECTIVE_BRANCH}"
+echo "movie=${MOVIE_IMAGE}:${GIT_SHA}"
+echo "cast=${CAST_IMAGE}:${GIT_SHA}"
 ''')
       }
     }
 
+    // staging si staging ou master
     stage('Deploy STAGING') {
-      when { anyOf { branch 'staging'; branch 'master' } }
+      when {
+        expression { return env.EFFECTIVE_BRANCH in ['staging', 'master'] }
+      }
       steps {
         sh(label: 'deploy staging', script: '''#!/usr/bin/env bash
 set -euo pipefail
-echo "Deploy STAGING placeholder"
+echo "Deploy STAGING"
+echo "branch=${EFFECTIVE_BRANCH}"
+echo "movie=${MOVIE_IMAGE}:${GIT_SHA}"
+echo "cast=${CAST_IMAGE}:${GIT_SHA}"
 ''')
       }
     }
 
-    // PROD: garde "main" si tu veux un flux type GitHub standard,
-    // sinon change en: anyOf { branch 'main'; branch 'master' }
+    // prod si master
     stage('Deploy PROD (manual)') {
-      when { branch 'master' }
+      when {
+        expression { return env.EFFECTIVE_BRANCH == 'master' }
+      }
       steps {
         input message: "Déployer en PROD avec ${GIT_SHA} ?", ok: "Déployer"
         sh(label: 'deploy prod', script: '''#!/usr/bin/env bash
 set -euo pipefail
-echo "Deploy PROD placeholder"
+echo "Deploy PROD"
+echo "branch=${EFFECTIVE_BRANCH}"
+echo "movie=${MOVIE_IMAGE}:${GIT_SHA}"
+echo "cast=${CAST_IMAGE}:${GIT_SHA}"
 ''')
       }
     }
