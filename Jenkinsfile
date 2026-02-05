@@ -8,7 +8,6 @@ pipeline {
     CAST_IMAGE     = "${DOCKERHUB_USER}/cast-service"
     CHART_DIR      = "charts"
 
-    // One Helm chart used twice => two releases per namespace
     RELEASE_MOVIE  = "movie"
     RELEASE_CAST   = "cast"
   }
@@ -26,21 +25,21 @@ pipeline {
 
     stage('Build images') {
       steps {
-        sh '''
+        sh(script: '''
           set -euo pipefail
           docker build -t ${MOVIE_IMAGE}:${GIT_SHA} ./movie-service
           docker build -t ${CAST_IMAGE}:${GIT_SHA}  ./cast-service
-        '''
+        ''', shell: '/bin/bash')
       }
     }
 
     stage('Push images') {
       steps {
-        sh '''
+        sh(script: '''
           set -euo pipefail
           docker push ${MOVIE_IMAGE}:${GIT_SHA}
           docker push ${CAST_IMAGE}:${GIT_SHA}
-        '''
+        ''', shell: '/bin/bash')
       }
     }
 
@@ -59,7 +58,7 @@ pipeline {
 }
 
 def deployEnv(String ns) {
-  sh """
+  sh(script: """
     set -euo pipefail
 
     echo "== Deploy MOVIE to namespace ${ns} =="
@@ -67,19 +66,19 @@ def deployEnv(String ns) {
       -n ${ns} --create-namespace \
       --set image.repository=docker.io/${MOVIE_IMAGE} \
       --set image.tag=${GIT_SHA} \
-      --set imagePullSecrets={} 
+      --set imagePullSecrets={}
 
     echo "== Deploy CAST to namespace ${ns} =="
     helm upgrade --install ${RELEASE_CAST} ${CHART_DIR} \
       -n ${ns} --create-namespace \
       --set image.repository=docker.io/${CAST_IMAGE} \
       --set image.tag=${GIT_SHA} \
-      --set imagePullSecrets={} 
+      --set imagePullSecrets={}
 
     echo "== Releases in ${ns} =="
     helm -n ${ns} list
 
     echo "== Pods in ${ns} =="
     kubectl -n ${ns} get pods -o wide
-  """
+  """, shell: '/bin/bash')
 }
