@@ -7,7 +7,7 @@ pipeline {
   }
 
   environment {
-    DOCKERHUB_NAMESPACE = 'examjeanlucbernier'
+    DOCKERHUB_NAMESPACE      = 'examjeanlucbernier'
     DOCKERHUB_CREDENTIALS_ID = 'dockerhub-creds'
     MOVIE_IMAGE = "${DOCKERHUB_NAMESPACE}/movie-service"
     CAST_IMAGE  = "${DOCKERHUB_NAMESPACE}/cast-service"
@@ -19,8 +19,15 @@ pipeline {
         checkout scm
         sh(label: 'git info', script: '''#!/usr/bin/env bash
 set -euo pipefail
-echo "Branch: ${BRANCH_NAME:-unknown}"
+
+echo "BRANCH_NAME (jenkins) = ${BRANCH_NAME:-<empty>}"
+echo "GIT_BRANCH   (jenkins) = ${GIT_BRANCH:-<empty>}"
+
+echo -n "git HEAD sha = "
 git rev-parse --short=12 HEAD
+
+echo -n "git branch   = "
+git rev-parse --abbrev-ref HEAD || true
 ''')
       }
     }
@@ -29,10 +36,19 @@ git rev-parse --short=12 HEAD
       steps {
         script {
           env.GIT_SHA = sh(script: "git rev-parse --short=12 HEAD", returnStdout: true).trim()
-          env.BRANCH_TAG = (env.BRANCH_NAME ?: "detached")
-            .replaceAll('[^a-zA-Z0-9_.-]+', '-')
-            .toLowerCase()
+
+          // Try Jenkins BRANCH_NAME first; if empty or "null", fall back to git.
+          def b = (env.BRANCH_NAME ?: "").trim()
+          if (!b || b == "null") {
+            b = sh(script: "git rev-parse --abbrev-ref HEAD || true", returnStdout: true).trim()
+          }
+          if (!b || b == "HEAD") {
+            b = "detached"
+          }
+
+          env.BRANCH_TAG = b.replaceAll('[^a-zA-Z0-9_.-]+', '-').toLowerCase()
         }
+
         sh(label: 'show tags', script: '''#!/usr/bin/env bash
 set -euo pipefail
 echo "GIT_SHA=${GIT_SHA}"
@@ -95,8 +111,9 @@ docker logout || true
       }
     }
 
+    // ✅ DEV: master (ton cas actuel) + develop (si tu l’utilises plus tard)
     stage('Deploy DEV') {
-      when { branch 'develop' }
+      when { anyOf { branch 'master'; branch 'develop' } }
       steps {
         sh(label: 'deploy dev', script: '''#!/usr/bin/env bash
 set -euo pipefail
@@ -127,6 +144,8 @@ echo "Deploy STAGING placeholder"
       }
     }
 
+    // PROD: garde "main" si tu veux un flux type GitHub standard,
+    // sinon change en: anyOf { branch 'main'; branch 'master' }
     stage('Deploy PROD (manual)') {
       when { branch 'main' }
       steps {
